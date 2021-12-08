@@ -1,0 +1,24 @@
+{
+	"type": "postgres",
+	"host": "137.184.158.246",
+	"port": 5432,
+	"username": "postgres",
+	"password": "pOiuytrew1!",
+	"database": "avechat",
+	"synchronize": true,
+	"logging": false,
+	"entities": ["src/entity/**/*.ts"],
+	"migrations": ["src/migration/**/*.ts"],
+	"subscribers": ["src/subscriber/**/*.ts"],
+	"cli": {
+		"entitiesDir": "src/entity",
+		"migrationsDir": "src/migration",
+		"subscribersDir": "src/subscriber"
+	},
+	"ssl": true,
+	"extra": {
+		"ssl": {
+			"rejectUnauthorized": false
+		}
+	}
+}
