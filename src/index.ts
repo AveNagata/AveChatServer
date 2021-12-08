@@ -84,11 +84,10 @@ async function createWebRtcTransport(router: any) {
 			const webRtcTransport_options = {
 				listenIps: [
 					{
-						ip: '0.0.0.0', // replace with relevant IP address
-						announcedIp: '54.146.248.82'
+						ip: '192.168.1.245', // replace with relevant IP address
+						announcedIp: '192.168.1.245'
 					}
 				],
-
 				enableUdp: true,
 				enableTcp: true,
 				preferUdp: true
@@ -119,8 +118,8 @@ function createExpressServer() {
 	httpServer = createServer(app);
 	app.use(
 		cors({
-			/* origin: 'http://127.0.0.1:3000', */
-			origin: 'https://achatapp.netlify.app',
+			origin: 'http://127.0.0.1:3000',
+			/* origin: "https://achatapp.netlify.app", */
 			credentials: true
 		})
 	);
@@ -208,8 +207,8 @@ async function startServer() {
 	server.applyMiddleware({ app, cors: false, path: '/' });
 	io = new Server(httpServer, {
 		path: '/ws/',
-		/* cors: { origin: ['http://127.0.0.1:3000'] } */
-		cors: { origin: ['https://achatapp.netlify.app'] }
+		cors: { origin: ['http://127.0.0.1:3000'] }
+		/* cors: { origin: ["https://achatapp.netlify.app"] }, */
 	});
 }
 
