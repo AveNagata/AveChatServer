@@ -1,39 +1,25 @@
-import {
-	Arg,
-	Ctx,
-	Mutation,
-	Query,
-	Resolver,
-	UseMiddleware,
-} from "type-graphql";
-import { hashThenInsertUser, compareHashPassword } from "./hash";
-import { User } from "./entity/Entities";
-import { Channel, LoginResponse } from "./entity/Other";
-import { MyContext } from "./interfaces/interfaces";
-import {
-	createAccessToken,
-	createRefreshToken,
-	sendRefreshToken,
-} from "./AccessToken";
-import { isAuth } from "./isAuth";
-import { verify } from "jsonwebtoken";
+import { Arg, Ctx, Mutation, Query, Resolver, UseMiddleware } from 'type-graphql';
+import { hashThenInsertUser, compareHashPassword } from './hash';
+import { User } from './entity/Entities';
+import { Channel, LoginResponse } from './entity/Other';
+import { MyContext } from './interfaces/interfaces';
+import { createAccessToken, createRefreshToken, sendRefreshToken } from './AccessToken';
+import { isAuth } from './isAuth';
+import { verify } from 'jsonwebtoken';
 
 @Resolver()
 export class UserResolver {
 	@Query(() => User, { nullable: true })
 	me(@Ctx() context: MyContext) {
-		const authorization = context.req.headers["authorization"];
+		const authorization = context.req.headers['authorization'];
 
 		if (!authorization) {
 			return null;
 		}
 
 		try {
-			const token = authorization.split(" ")[1];
-			const payload: any = verify(
-				token,
-				process.env.ACCESS_TOKEN_SECRET!
-			);
+			const token = authorization.split(' ')[1];
+			const payload: any = verify(token, process.env.ACCESS_TOKEN_SECRET!);
 			return User.findOne(payload.userId);
 		} catch (err) {
 			console.log(err);
@@ -48,8 +34,8 @@ export class UserResolver {
 
 	@Mutation(() => User, { nullable: true })
 	async addUserToChannel(
-		@Arg("username") username: string,
-		@Arg("channelName") channelName: string
+		@Arg('username') username: string,
+		@Arg('channelName') channelName: string
 	) {
 		const user = await User.findOne({ where: { username } });
 		const channelFound = await Channel.findOne({ where: { channelName } });
@@ -68,10 +54,21 @@ export class UserResolver {
 		return user;
 	}
 
+	@Mutation(() => Boolean, { nullable: true })
+	async setUserIsStreaming(@Arg('username') username: string) {
+		const user = await User.findOne({ where: { username } });
+		if (!user) {
+			return null;
+		}
+		user.isStreaming = !user.isStreaming;
+		User.update(user.id, user);
+		return true;
+	}
+
 	@Mutation(() => User, { nullable: true })
 	async removeUserFromChannel(
-		@Arg("username") username: string,
-		@Arg("channelName") channelName: string
+		@Arg('username') username: string,
+		@Arg('channelName') channelName: string
 	) {
 		const user = await User.findOne({ where: { username } });
 		if (!user) {
@@ -91,7 +88,7 @@ export class UserResolver {
 	}
 
 	@Mutation(() => User, { nullable: true })
-	async removeUserFromAllChannels(@Arg("username") username: string) {
+	async removeUserFromAllChannels(@Arg('username') username: string) {
 		const user = await User.findOne({ where: { username } });
 		if (!user) {
 			return null;
@@ -103,7 +100,7 @@ export class UserResolver {
 	}
 
 	@Mutation(() => Boolean)
-	async remove(@Arg("username") username: string) {
+	async remove(@Arg('username') username: string) {
 		const user = await User.findOne({ where: { username } });
 		if (!user) {
 			return false;
@@ -117,38 +114,35 @@ export class UserResolver {
 
 	@Mutation(() => Boolean)
 	async logout(@Ctx() { res }: MyContext) {
-		sendRefreshToken(res, "");
+		sendRefreshToken(res, '');
 		return true;
 	}
 
 	@Mutation(() => LoginResponse)
 	async login(
-		@Arg("username") username: string,
-		@Arg("password") password: string,
+		@Arg('username') username: string,
+		@Arg('password') password: string,
 		@Ctx() { res }: MyContext
 	) {
 		const user = await User.findOne({ where: { username } });
 		if (!user) {
-			throw new Error("Cannot Find User");
+			throw new Error('Cannot Find User');
 		}
 
 		if (!(await compareHashPassword(user, password))) {
-			throw new Error("Invalid Password");
+			throw new Error('Invalid Password');
 		}
 
 		sendRefreshToken(res, createRefreshToken(user));
 
 		return {
 			accessToken: createAccessToken(user),
-			user,
+			user
 		};
 	}
 
 	@Mutation(() => Boolean)
-	async register(
-		@Arg("username") username: string,
-		@Arg("password") password: string
-	) {
+	async register(@Arg('username') username: string, @Arg('password') password: string) {
 		const user = await User.findOne({ where: { username } });
 
 		if (user) {

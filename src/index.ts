@@ -10,28 +10,50 @@ import { UserResolver } from './UserResolver';
 import { verify } from 'jsonwebtoken';
 import { User } from './entity/Entities';
 import { createAccessToken, createRefreshToken, sendRefreshToken } from './AccessToken';
-import { createServer } from 'http';
+import { createServer } from 'https';
 import { execute, subscribe } from 'graphql';
 import { SubscriptionServer } from 'subscriptions-transport-ws';
-import { makeExecutableSchema } from '@graphql-tools/schema';
 import { ChatResolver } from './ChatResolver';
 import { ApolloServerPluginLandingPageGraphQLPlayground } from 'apollo-server-core';
 
-const mediasoup = require('mediasoup');
-const config = require('./config');
+/* Steps to create self-signed cert...
+-----------------------
+openssl genrsa -out key.pem
+openssl req -new -key key.pem -out csr.pem
+openssl x509 -req -days 9999 -in csr.pem -signkey key.pem -out cert.pem
+rm csr.pem
+-----------------------
+*/
 
-let worker: any;
+const mediasoup = require('mediasoup');
+
+let worker: any; // A worker represents a mediasoup C++ subprocess that runs in a single CPU core and handles Router instances
 let rooms: any = {};
-let peers: any = {};
-let transports: any = [];
-let producers: any = [];
-let consumers: any = [];
+let peers: any = {}; // A peer is not webRTC related, but is being used as a container to hold all routers, transports, producers, and consumers
+let transports: any = []; // A transport connects an endpoint with a mediasoup router and enables transmission of media in both directions by means of Producer, Consumer
+let producers: any = []; // A producer represents an audio or video source being injected into a mediasoup router.
+let consumers: any = []; // A consumer represents an audio or video remote source being transmitted from the mediasoup router to the client application through a WebRTC transport.
+let inRoom: boolean = false;
+
 let app: any;
 let httpServer: any;
 let server: any;
 let io: any;
 
 const PORT = process.env.PORT || 4000;
+const path = require('path');
+const fs = require('fs');
+
+/* const corsOrigin = 'http://127.0.0.1:3000'; */
+const corsOrigin = 'https://achatapp.netlify.app';
+
+// Digital Ocean IP
+// '147.182.209.38'
+
+const options = {
+	key: fs.readFileSync(path.resolve(__dirname, 'key.pem')),
+	cert: fs.readFileSync(path.resolve(__dirname, 'cert.pem'))
+};
 
 let mediaCodecs = [
 	{
@@ -45,7 +67,7 @@ let mediaCodecs = [
 		mimeType: 'video/VP8',
 		clockRate: 90000,
 		parameters: {
-			'x-google-start-bitrate': 1000
+			'x-google-start-bitrate': 5000
 		}
 	}
 ];
@@ -62,9 +84,11 @@ let mediaCodecs = [
 		console.log('Express server has started');
 	});
 
+	// create a worker as soon as our application starts
 	worker = createWorker();
 })();
 
+// Create mediasoup worker
 async function createWorker() {
 	worker = await mediasoup.createWorker();
 	console.log(`worker pid ${worker.pid}`);
@@ -77,6 +101,7 @@ async function createWorker() {
 	return worker;
 }
 
+// create webrtc transport for each router (room)
 async function createWebRtcTransport(router: any) {
 	return new Promise(async (resolve, reject) => {
 		try {
@@ -84,8 +109,8 @@ async function createWebRtcTransport(router: any) {
 			const webRtcTransport_options = {
 				listenIps: [
 					{
-						ip: '192.168.1.245', // replace with relevant IP address
-						announcedIp: '192.168.1.245'
+						ip: '147.182.209.38' // replace with relevant IP address
+						/* announcedIp: '192.168.1.245' */
 					}
 				],
 				enableUdp: true,
@@ -93,6 +118,7 @@ async function createWebRtcTransport(router: any) {
 				preferUdp: true
 			};
 
+			// router is passed in from socket event and is define in the rooms array
 			let transport = await router.createWebRtcTransport(webRtcTransport_options);
 			console.log(`transport id: ${transport.id}`);
 
@@ -105,7 +131,7 @@ async function createWebRtcTransport(router: any) {
 			transport.on('close', () => {
 				console.log('transport closed');
 			});
-
+			// resolve promise with transport
 			resolve(transport);
 		} catch (error) {
 			reject(error);
@@ -115,11 +141,10 @@ async function createWebRtcTransport(router: any) {
 
 function createExpressServer() {
 	app = express();
-	httpServer = createServer(app);
+	httpServer = createServer(options, app);
 	app.use(
 		cors({
-			origin: 'http://127.0.0.1:3000',
-			/* origin: "https://achatapp.netlify.app", */
+			origin: corsOrigin,
 			credentials: true
 		})
 	);
@@ -192,7 +217,7 @@ async function createApolloServer() {
 			subscribe
 		},
 		{
-			// This is the `httpServer` we created in a previous step.
+			// This is the `httpServer` created above
 			server: httpServer
 			// This `server` is the instance returned from `new ApolloServer`.
 			//path: "/subscriptions",
@@ -207,8 +232,7 @@ async function startServer() {
 	server.applyMiddleware({ app, cors: false, path: '/' });
 	io = new Server(httpServer, {
 		path: '/ws/',
-		cors: { origin: ['http://127.0.0.1:3000'] }
-		/* cors: { origin: ["https://achatapp.netlify.app"] }, */
+		cors: { origin: [corsOrigin] }
 	});
 }
 
@@ -216,19 +240,16 @@ async function socketEvents() {
 	io.on('connection', async function (socket: any) {
 		const socketsStatus: any = {};
 		console.log(socket.id, ' has connected to the socket.');
-		let roomName: any;
-		const socketId = socket.id;
+		// let roomName: any;
+		// const socketId = socket.id;
 		socketsStatus[socket.id] = {};
-
-		// socket.on('getRtpCapabilities', (callback) => {
-		// 	const rtpCapabilities = router.rtpCapabilities;
-		// 	callback({ rtpCapabilities });
-		// });
 
 		socket.on('createWebRtcTransport', async ({ consumer }: any, callback: any) => {
 			const roomName = peers[socket.id].roomName;
 			const router = rooms[roomName].router;
 
+			// client emits event and passes in consumer, which is used when creating the transport
+			// returns a promise that then proceeds to append new transport into the transports array
 			createWebRtcTransport(router).then(
 				(transport: any) => {
 					callback({
@@ -247,6 +268,7 @@ async function socketEvents() {
 			);
 		});
 
+		// Create webRTC transport for current router and append the transport onto the peers array
 		const addTransport = (transport: any, roomName: any, consumer: any) => {
 			transports = [...transports, { socketId: socket.id, transport, roomName, consumer }];
 
@@ -255,9 +277,16 @@ async function socketEvents() {
 				transports: [...peers[socket.id].transports, transport.id]
 			};
 		};
-		socket.on('joinRoom', async ({ roomName }: any, callback: any) => {
-			const router1 = await createRoom(roomName, socket.id);
 
+		// first function that gets called when user joins a room
+		// begins all of the other login
+		// appends room to you corresponding peer index ---> creates producer, then router, then consumer
+		socket.on('joinRoom', async ({ roomName }: any, callback: any) => {
+			console.log('ROOM NAME: ', roomName);
+			const router1 = await createRoom(roomName, socket.id);
+			if (router1) {
+				inRoom = true;
+			}
 			peers[socket.id] = {
 				socket,
 				roomName,
@@ -270,14 +299,19 @@ async function socketEvents() {
 				}
 			};
 
+			// get Router RTP Capabilities
 			const rtpCapabilities = router1.rtpCapabilities;
 
+			// retursn RTP capabilities of the router (room)
 			callback({ rtpCapabilities });
 		});
 
+		// create room based on string passed from socket event and if room does not exist, create a router for that room. append router and peers onto room array
 		const createRoom = async (roomName: any, socketId: any) => {
 			let router1;
 			let peers = [];
+
+			// if room does not exist, create router for room, otherwise get the router and the peers within that router
 			if (rooms[roomName]) {
 				router1 = rooms[roomName].router;
 				peers = rooms[roomName].peers || [];
@@ -291,9 +325,12 @@ async function socketEvents() {
 				router: router1,
 				peers: [...peers, socketId]
 			};
+
+			// return router
 			return router1;
 		};
 
+		// array management --> adds new producer and the corresponding id/roomname into the peers array
 		const addProducer = (producer: any, roomName: any) => {
 			producers = [...producers, { socketId: socket.id, producer, roomName }];
 
@@ -303,6 +340,7 @@ async function socketEvents() {
 			};
 		};
 
+		// array management --> adds new consumer and the corresponding id/roomname into the peers array
 		const addConsumer = (consumer: any, roomName: any) => {
 			consumers = [...consumers, { socketId: socket.id, consumer, roomName }];
 
@@ -312,6 +350,7 @@ async function socketEvents() {
 			};
 		};
 
+		// returns array that contains all of the produces in a router
 		socket.on('getProducers', (callback: any) => {
 			const { roomName } = peers[socket.id];
 			console.log(roomName);
@@ -325,26 +364,33 @@ async function socketEvents() {
 			callback(producerList);
 		});
 
+		// broadcasts new producer to peers already inside a router
 		const informConsumers = (roomName: any, socketId: any, id: any) => {
 			console.log(`just joined, id ${id}, ${roomName}, ${socketId}`);
 			producers.forEach((producerData: any) => {
 				if (producerData.socketId !== socketId && producerData.roomName === roomName) {
 					const producerSocket = peers[producerData.socketId].socket;
+					// Let consumers know a new producer has joined and create the transport for that producer
 					producerSocket.emit('new-producer', { producerId: id });
 				}
 			});
 		};
+
+		// get the transport for the current socket
 		const getTransport = (socketId: any) => {
 			const [producerTransport] = transports.filter(
 				(transport: any) => transport.socketId === socketId && !transport.consumer
 			);
 			return producerTransport.transport;
 		};
+
+		// connects the producer transport
 		socket.on('transport-connect', async ({ dtlsParameters }: any) => {
 			console.log('DTLS PARAMS: ...', { dtlsParameters });
 			getTransport(socket.id).connect({ dtlsParameters });
 		});
 
+		// new producer streams to consumers in router
 		socket.on('transport-produce', async ({ kind, rtpParameters }: any, callback: any) => {
 			const producer = await getTransport(socket.id).produce({
 				kind,
@@ -471,35 +517,55 @@ async function socketEvents() {
 		});
 
 		socket.on('disconnect', () => {
-			console.log('=============================================');
-			console.log('peer disconnected');
-			consumers = removeItems(consumers, 'consumer');
-			producers = removeItems(producers, 'producer');
-			transports = removeItems(transports, 'transport');
+			if (inRoom) {
+				console.log('=============================================');
 
-			const { roomName } = peers[socket.id];
-			delete peers[socket.id];
+				// array cleanup
+				console.log('peer disconnected');
+				consumers = removeItems(consumers, 'consumer');
+				producers = removeItems(producers, 'producer');
+				transports = removeItems(transports, 'transport');
+				if (peers[socket.id]) {
+					if (peers[socket.id].roomName) {
+						const { roomName } = peers[socket.id];
 
-			rooms[roomName] = {
-				router: rooms[roomName].router,
-				peers: rooms[roomName].peers.filter((socketId: any) => socketId !== socket.id)
-			};
+						delete peers[socket.id];
+
+						// remove socket from room
+						rooms[roomName] = {
+							router: rooms[roomName].router,
+							peers: rooms[roomName].peers.filter(
+								(socketId: any) => socketId !== socket.id
+							)
+						};
+					}
+				}
+			}
+			inRoom = false;
 		});
 
 		socket.on('leaveRoom', () => {
-			console.log('*********************************************');
-			console.log('peer disconnected');
-			consumers = removeItems(consumers, 'consumer');
-			producers = removeItems(producers, 'producer');
-			transports = removeItems(transports, 'transport');
+			if (inRoom) {
+				console.log('*********************************************');
+				console.log('peer disconnected');
+				consumers = removeItems(consumers, 'consumer');
+				producers = removeItems(producers, 'producer');
+				transports = removeItems(transports, 'transport');
+				if (peers[socket.id]) {
+					if (peers[socket.id].roomName) {
+						const { roomName } = peers[socket.id];
+						delete peers[socket.id];
 
-			const { roomName } = peers[socket.id];
-			delete peers[socket.id];
-
-			rooms[roomName] = {
-				router: rooms[roomName].router,
-				peers: rooms[roomName].peers.filter((socketId: any) => socketId !== socket.id)
-			};
+						rooms[roomName] = {
+							router: rooms[roomName].router,
+							peers: rooms[roomName].peers.filter(
+								(socketId: any) => socketId !== socket.id
+							)
+						};
+					}
+				}
+			}
+			inRoom = false;
 		});
 	});
 }

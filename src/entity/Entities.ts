@@ -1,9 +1,9 @@
-import { Field, Int, ObjectType } from "type-graphql";
-import { Entity, PrimaryGeneratedColumn, Column, BaseEntity } from "typeorm";
+import { Field, Int, ObjectType } from 'type-graphql';
+import { Entity, PrimaryGeneratedColumn, Column, BaseEntity } from 'typeorm';
 
 // Object Type that extends Base Entity so that it can use the Active Record to access the entity in the database
 @ObjectType()
-@Entity("users")
+@Entity('users')
 export class User extends BaseEntity {
 	@Field(() => Int)
 	@PrimaryGeneratedColumn()
@@ -13,23 +13,27 @@ export class User extends BaseEntity {
 	@Column()
 	username: string;
 
+	@Field()
+	@Column({ default: false })
+	isStreaming: boolean;
+
 	@Column()
 	password: string;
 
 	@Field()
-	@Column({ default: "" })
+	@Column({ default: '' })
 	dateCreated: string;
 
 	@Field(() => [String])
-	@Column("text", { array: true, default: [] })
+	@Column('text', { array: true, default: [] })
 	channels: string[];
 
-	@Column("int", { default: 0 })
+	@Column('int', { default: 0 })
 	tokenVersion: number;
 }
 
 @ObjectType()
-@Entity("chat")
+@Entity('chat')
 export class Chat extends BaseEntity {
 	@Field(() => Int)
 	@PrimaryGeneratedColumn()
