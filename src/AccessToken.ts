@@ -18,8 +18,8 @@ export const createRefreshToken = (user: User) => {
 
 export const sendRefreshToken = (res: Response, token: string) => {
 	res.cookie('jid', token, {
-		/* secure: true, */
-		httpOnly: true
-		/* sameSite: 'none' */
+		secure: true,
+		httpOnly: true,
+		sameSite: 'none'
 	});
 };

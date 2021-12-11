@@ -90,7 +90,10 @@ let mediaCodecs = [
 
 // Create mediasoup worker
 async function createWorker() {
-	worker = await mediasoup.createWorker();
+	worker = await mediasoup.createWorker({
+		rtcMinPort: 2000,
+		rtcMaxPort: 2020
+	});
 	console.log(`worker pid ${worker.pid}`);
 
 	worker.on('died', (_error: any) => {
@@ -109,8 +112,9 @@ async function createWebRtcTransport(router: any) {
 			const webRtcTransport_options = {
 				listenIps: [
 					{
-						ip: '147.182.209.38' // replace with relevant IP address
+						ip: '0.0.0.0', // replace with relevant IP address
 						/* announcedIp: '192.168.1.245' */
+						announcedIp: '147.182.209.38'
 					}
 				],
 				enableUdp: true,
@@ -282,7 +286,6 @@ async function socketEvents() {
 		// begins all of the other login
 		// appends room to you corresponding peer index ---> creates producer, then router, then consumer
 		socket.on('joinRoom', async ({ roomName }: any, callback: any) => {
-			console.log('ROOM NAME: ', roomName);
 			const router1 = await createRoom(roomName, socket.id);
 			if (router1) {
 				inRoom = true;
@@ -381,6 +384,7 @@ async function socketEvents() {
 			const [producerTransport] = transports.filter(
 				(transport: any) => transport.socketId === socketId && !transport.consumer
 			);
+
 			return producerTransport.transport;
 		};
 
@@ -504,7 +508,6 @@ async function socketEvents() {
 				}
 			});
 			items = items.filter((item: any) => item.socketId !== socket.id);
-
 			return items;
 		};
 
@@ -517,7 +520,28 @@ async function socketEvents() {
 		});
 
 		socket.on('disconnect', () => {
-			if (inRoom) {
+			// do some cleanup
+			console.log('peer disconnected');
+
+			consumers = removeItems(consumers, 'consumer');
+			producers = removeItems(producers, 'producer');
+			transports = removeItems(transports, 'transport');
+			try {
+				if (!peers[socket.id]) return;
+				const { roomName } = peers[socket.id];
+				rooms[roomName] = {
+					router: rooms[roomName].router,
+					peers: rooms[roomName].peers.filter((socketId: any) => socketId !== socket.id)
+				};
+			} catch (err) {
+				console.log(err);
+			}
+
+			delete peers[socket.id];
+
+			// remove socket from room
+
+			/* if (inRoom) {
 				console.log('=============================================');
 
 				// array cleanup
@@ -541,11 +565,28 @@ async function socketEvents() {
 					}
 				}
 			}
-			inRoom = false;
+			inRoom = false; */
 		});
 
 		socket.on('leaveRoom', () => {
-			if (inRoom) {
+			// do some cleanup
+			console.log('peer disconnected');
+			if (!socket.id) return;
+			consumers = removeItems(consumers, 'consumer');
+			producers = removeItems(producers, 'producer');
+			transports = removeItems(transports, 'transport');
+
+			try {
+				if (!peers[socket.id]) return;
+				const { roomName } = peers[socket.id];
+				rooms[roomName] = {
+					router: rooms[roomName].router,
+					peers: rooms[roomName].peers.filter((socketId: any) => socketId !== socket.id)
+				};
+			} catch (err) {
+				console.log(err);
+			}
+			/* if (inRoom) {
 				console.log('*********************************************');
 				console.log('peer disconnected');
 				consumers = removeItems(consumers, 'consumer');
@@ -565,7 +606,7 @@ async function socketEvents() {
 					}
 				}
 			}
-			inRoom = false;
+			inRoom = false; */
 		});
 	});
 }
